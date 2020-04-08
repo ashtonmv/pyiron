@@ -96,7 +96,7 @@ class SphinxBase(GenericDFTJob):
 
     @property
     def plane_wave_cutoff(self):
-        return self.basis["eCut"]
+        return self.input.basis["eCut"]
 
     @property
     def fix_spin_constraint(self):
@@ -121,8 +121,8 @@ class SphinxBase(GenericDFTJob):
             raise ValueError("Cutoff radius value not valid")
         elif val < 50:
             warnings.warn(
-                "The given cutoff is either very small (probably
-                too small), or was accidentally given in Ry. Please
+                "The given cutoff is either very small- probably\
+                too small- or was accidentally given in Ry. Please\
                 ensure that the cutoff is in eV (1eV ~= 13.6 Ry)."
             )
         self.input.basis["eCut"] = val
@@ -433,9 +433,10 @@ class SphinxBase(GenericDFTJob):
         if from_charge_density and os.path.isfile(
             posixpath.join(self.working_directory, "rho.sxb")
         ):
-            new_job.restart_file_list.append(
-                posixpath.join(self.working_directory, "rho.sxb")
-            )
+            new_job.input.guess["rho"]["atomicOrbitals"] = False
+            new_job.input.guess["rho"]["file"] = posixpath.join(
+                self.working_directory, "rho.sxb")
+
         elif from_charge_density:
             self._logger.warning(
                 msg="A charge density from job: {} is not generated and therefore it can't be read.".format(
@@ -445,9 +446,9 @@ class SphinxBase(GenericDFTJob):
         if from_wave_functions and os.path.isfile(
             posixpath.join(self.working_directory, "waves.sxb")
         ):
-            new_job.restart_file_list.append(
-                posixpath.join(self.working_directory, "waves.sxb")
-            )
+            new_job.input.guess["rho"]["atomicOrbitals"] = False
+            new_job.input.guess["rho"]["fromWaves"] = posixpath.join(
+                self.working_directory, "waves.sxb")
         elif from_wave_functions:
             self._logger.warning(
                 msg="A WAVECAR from job: {} is not generated and therefore it can't be read.".format(
@@ -760,101 +761,49 @@ class SphinxBase(GenericDFTJob):
 
             self._kpoints_odict = odict([("kPoints", kpoints)])
         else:
-            raise ValueError("only Monkhorst-Pack mesh and Line mode are implemented in SPHInX")
+            raise ValueError("only Monkhorst-Pack mesh and Line mode\
+                are implemented in SPHInX")
 
     def write_input(self):
         """
-        The write_input function is called when the job is executed to generate all the required input files for the
-        calculation of the Sphinx job.
+        The write_input function is called when the job is executed to
+        generate all the required input files for the Sphinx job.
         """
- 
-        if self.input["VaspPot"]:
-            self.input_writer.write_potentials(potformat="VASP")
-        else:
-            self.input_writer.write_potentials(potformat="JTH")
-        self.input_writer.write_structure()
-        for group in [self.basis,
-                      self.hamilton,
-                      self.guess,
-                      self.spin_constraint,
-                      self.main]:
-            self.input_writer.write_group(group)
-        self.input_writer.write_wrapper()
 
         self._coarse_run = self.input["CoarseRun"]
-        if self.hamilton["EmptyStates"] == "auto":
-            self.hamilton["EmptyStates"] = int(len(self.structure) + 3)
+        if self.input.hamilton["nEmptyStates"] == "auto":
+            self.input.hamilton["nEmptyStates"] = int(len(self.structure) + 3)
             if np.any(self.structure.get_initial_magnetic_moments() != None):
-                self.hamilton["EmptyStates"] = int(1.5 * len(self.structure) + 3)
+                self.input.hamilton["nEmptyStates"] = int(
+                    1.5 * len(self.structure) + 3)
         self.input_writer.structure = self.structure
-        write_waves = self.input["WriteWaves"]
-        save_memory = self.input["SaveMemory"]
+
         check_overlap = self.input["CheckOverlap"]
         enable_kjxc = self.input["KJxc"]
-        if self._main_str is None:
-            if self.input["VaspPot"]:
-                self.input_writer.write_potentials(
-                    file_name="potentials.sx",
-                    cwd=self.working_directory,
-                    species_str=self._species_str,
-                    check_overlap=check_overlap,
-                    xc=self.input["Xcorr"],
-                    potformat="VASP"
-                )
-            else:
-                self.input_writer.write_potentials(
-                    file_name="potentials.sx",
-                    cwd=self.working_directory,
-                    species_str=self._species_str,
-                    check_overlap=check_overlap,
-                    xc=self.input["Xcorr"],
-                    potformat="JTH"
-                )
-            self.input_writer.write_guess(
-                file_name="guess.sx",
-                cwd=self.working_directory,
-                guess_str=self._guess_str,
-                restart_file_str=self.restart_file_list,
-                write_waves=write_waves,
-            )
-            self.input_writer.write_structure(
-                file_name="structure.sx",
-                cwd=self.working_directory,
-                structure_str=self._structure_str,
-                symmetry_enabled=self._generic_input["fix_symmetry"],
-            )
-            self.input_writer.write_control(
-                file_name="control.sx",
-                cwd=self.working_directory,
-                control_str=self._control_str,
-            )
-            self.input_writer.write_basis(
-                file_name="basis.sx",
-                cwd=self.working_directory,
-                basis_str=self._basis_str,
-                save_memory=save_memory,
-                kpoints_odict=self._kpoints_odict
-            )
-            self.input_writer.write_hamilton(
-                file_name="hamilton.sx",
-                cwd=self.working_directory,
-                hamilston_str=self._hamilston_str,
-            )
-            if self._generic_input["fix_spin_constraint"]:
-                self.input_writer.write_spins_constraints(
-                    file_name="spins.in",
-                    cwd=self.working_directory,
-                    spins_str=self._spins_str,
-                )
-        self.input.write_file(file_name="userparameters.sx", cwd=self.working_directory)
-        self.input_writer.write_main(
-            file_name="input.sx",
-            cwd=self.working_directory,
-            main_str=self._main_str,
-            spin_constraint_enabled=self._generic_input["fix_spin_constraint"],
-            enable_kjxc=enable_kjxc,
-            job_name=self.job_name,
-        )
+
+        if self.input["VaspPot"]:
+            self.input_writer.write_potentials(potformat="VASP", check_overlap=check_overlap)
+        else:
+            self.input_writer.write_potentials(potformat="JTH", check_overlap=check_overlap)
+
+        self.input_writer.write_structure()
+
+        if self.input["WriteWaves"] is False:
+            self.input.main["noWavesStorage"] = True
+
+        if self.input["SaveMemory"] is True:
+            self.input.basis["saveMemory"] = True
+
+        self.input.basis["eCut"] /= 13.606
+
+        if self._generic_input["fix_spin_constraint"]:
+            self.input_writer.write_spin_constraints()
+            self.input.spin["file"] = "spins.in"
+
+        for group in self.input.groups:
+            # basis, PAWHamiltionian, initialGuess, spinConstraint, & main
+            self.input_writer.write_group(group)
+        self.input_writer.write_wrapper(enable_kjxc=enable_kjxc)
 
     def collect_output(self, force_update=False):
         """
@@ -1040,61 +989,34 @@ class InputWriter(object):
         self._id_spx_to_pyi = []
         self.file_dict = {}
 
-    def write_wrapper(
-        self,
-        file_name="input.sx",
-        cwd=None,
-        main_str=None,
-        spin_constraint_enabled=False,
-        enable_kjxc=False,
-        job_name=None,
-    ):
+    def write_wrapper(self, file_name="input.sx", enable_kjxc=False):
         """
         Write the main Sphinx script named input.sx.
 
         Args:
             file_name (str): name of the file to be written (optional)
-            cwd (str): the current working directory (optinal)
-            main_str (str): the input to write;
-                            if no input is given,
-                            the default input will be written. (optinal)
+            enable_kjxc (bool): Whether or not to enable kjxc in pawPot.
         """
-        if main_str is None:
-            self.file_dict['input'] = self.get_main(enable_kjxc=enable_kjxc,
-                                                    spin_constraint_enabled=spin_constraint_enabled,
-                                                    job_name=job_name)
-        else:
-            self.file_dict['input'] = main_str
-        if cwd is not None:
-            file_name = posixpath.join(cwd, file_name)
+
         with open(file_name, "w") as f:
-            f.write(self._odict_to_spx_input(self.file_dict['input']))
+            f.write("// SPHInX input file generated by pyiron\n")
+            f.write("format paw;\n")
+            f.write("include <parameters.sx>;\n")
+            f.write("pawPot { include <pawPot.sx>; ")
+            if enable_kjxc:
+                f.write("kjxc; ")
+            f.write(" }\n")
+            f.write("structure { include <structure.sx>; }\n")
+            f.write("basis { include <basis.sx>; }\n")
+            f.write("PAWHamiltonian { include <PAWHamiltonian.sx>; }\n")
+            f.write("initialGuess { include <initialGuess.sx>; }\n")
+            f.write("spinConstraint { include <spinConstraint.sx>; }\n")
+            f.write("main { include <main.sx>; }\n")
 
     @staticmethod
-    def get_main(enable_kjxc=False, spin_constraint_enabled=False, job_name=None):
-        line = odict(
-            [
-                ("//" + str(job_name), None),
-                ("//SPHinX input file generated by pyiron", None),
-                ("format paw", None),
-                ("include <parameters.sx>", None),
-                ("include <userparameters.sx>", None),
-            ]
-        )
-        if enable_kjxc:
-            line["pawPot"] = odict(
-                [("include <potentials.sx>", None), ("kjxc", None)]
-            )
-        else:
-            line["pawPot"] = odict([("include <potentials.sx>", None)])
-        line["structure"] = odict([("include <structure.sx>", None)])
-        line["basis"] = odict([("include <basis.sx>", None)])
-        line["PAWHamiltonian"] = odict([("include <hamilton.sx>", None)])
-        line["initialGuess"] = odict([("include <guess.sx>", None)])
-        if spin_constraint_enabled:
-            line["spinConstraint"] = odict([("file", '"spins.in"')])
-        line["main"] = odict([("include <control.sx>", None)])
-        return line
+    def write_group(group):
+        with open(f"{group.name}.sx", "w") as f:
+            f.write(group.to_spx_str())
 
     @property
     def id_spx_to_pyi(self):
@@ -1128,20 +1050,20 @@ class InputWriter(object):
 
     def write_potentials(
         self,
-        file_name="potentials.sx",
+        file_name="pawPot.sx",
         cwd=None,
-        species_str=None,
+        species_group=None,
         check_overlap=True,
         xc=None,
         potformat='JTH',
     ):
         """
-        Write the Sphinx potential configuration named potentials.sx.
+        Write the Sphinx potential configuration to pawPot.sx.
 
         Args:
             file_name (str): name of the file to be written (optional)
             cwd (str): the current working directory (optional)
-            species_str (str): the input to write, if no input is given the default input will be written. (optional)
+            species (Group): the input to write, if no input is given the default input will be written. (optional)
         """
         if potformat == 'JTH':
             potentials = SphinxJTHPotentialFile(xc=xc)
@@ -1153,8 +1075,8 @@ class InputWriter(object):
             pot_path_dict = {"PBE": "paw-gga-pbe", "LDA": "paw-lda"}
         else:
             raise ValueError('Only JTH and VASP potentials are supported!')
-        if species_str is None:
-            species_str = odict()
+        if species_group is None:
+            species_group = Group("species")
             for species_obj in self.structure.get_species_objects():
                 if species_obj.Parent is not None:
                     elem = species_obj.Parent
@@ -1185,9 +1107,9 @@ class InputWriter(object):
                 else: 
                     copyfile(potential_path, posixpath.join(cwd, elem + "_POTCAR"))
                 check_overlap_str = ""
-                species_str.setdefault("species", [])
+                species_group.setdefault("species", [])
                 if potformat == "JTH":
-                    species_str["species"].append(
+                    species_group["species"].append(
                         odict(
                             [
                                 ("name", '"' + elem + '"'),
@@ -1198,7 +1120,7 @@ class InputWriter(object):
                         )
                     )
                 elif potformat == "VASP":
-                    species_str["species"].append(
+                    species_group["species"].append(
                         odict(
                             [
                                 ("name", '"' + elem + '"'),
@@ -1211,52 +1133,36 @@ class InputWriter(object):
                 else:
                     raise ValueError()
                 if not check_overlap:
-                    species_str["species"][-1]["checkOverlap"] = "false"
+                    species_group["species"][-1]["checkOverlap"] = "false"
         if cwd is not None:
             file_name = posixpath.join(cwd, file_name)
         with open(file_name, "w") as f:
-            f.write(self._odict_to_spx_input(species_str))
+            f.write(species_group.to_spx_str())
 
-    def write_control(self, file_name="control.sx", cwd=None, control_str=None):
-        """
-        Write the Sphinx control script named control.sx
-
-        Args:
-            file_name (str): name of the file to be written (optional)
-            cwd (str): the current working directory (optinal)
-            control_str (OrderedDict): the input to write, if no input is given the default input will be written.
-        """
-
-        if type(control_str) == odict:
-            control_str = self._odict_to_spx_input(control_str)
-        if cwd is not None:
-            file_name = posixpath.join(cwd, file_name)
-        with open(file_name, "w") as f:
-            f.write(control_str)
 
     def write_structure(
         self,
         file_name="structure.sx",
         cwd=None,
-        structure_str=None,
+        structure_group=None,
         symmetry_enabled=True,
         keep_angstrom=False,
     ):
         """
-        Write the Sphinx structure file named structure.sx
+        Write the Sphinx structure file to structure.sx
 
         Args:
             file_name (str): name of the file to be written (optional)
             cwd (str): the current working directory (optinal)
-            structure_str (str): the input to write, if no input is given the default input will be written. (optinal)
+            structure_group (Group): the input to write, if no input is given the default input will be written. (optional)
         """
-        if structure_str is None:
+        if structure_group is None:
             if keep_angstrom:
-                structure_str = odict(
+                structure_group = Group("structure",
                     [("cell", str(np.array(self.structure.cell).tolist()))]
                 )
             else:
-                structure_str = odict(
+                structure_group = Group("structure"
                     [
                         (
                             "cell",
@@ -1277,8 +1183,8 @@ class InputWriter(object):
                     element = elm_species.Parent
                 else:
                     element = elm_species.Abbreviation
-                structure_str.setdefault("species", [])
-                structure_str["species"].append(
+                structure_group.setdefault("species", [])
+                structure_group["species"].append(
                     odict([("element", '"' + str(element) + '"')])
                 )
                 elm_list = np.array(
@@ -1289,177 +1195,50 @@ class InputWriter(object):
                     np.array(self.structure.get_initial_magnetic_moments())[elm_list],
                     np.array(selective_dynamics_list)[elm_list],
                 ):
-                    structure_str["species"][-1].setdefault("atom", [])
-                    structure_str["species"][-1]["atom"].append(odict())
+                    structure_group["species"][-1].setdefault("atom", [])
+                    structure_group["species"][-1]["atom"].append(odict())
                     if self._spin_enabled:
-                        structure_str["species"][-1]["atom"][-1]["label"] = (
+                        structure_group["species"][-1]["atom"][-1]["label"] = (
                             '"spin_' + str(elm_magmon) + '"'
                         )
                     if keep_angstrom:
-                        structure_str["species"][-1]["atom"][-1]["coords"] = str(
+                        structure_group["species"][-1]["atom"][-1]["coords"] = str(
                             np.array(elm_pos).tolist()
                         )
                     else:
-                        structure_str["species"][-1]["atom"][-1]["coords"] = str(
+                        structure_group["species"][-1]["atom"][-1]["coords"] = str(
                             np.array(elm_pos * 1 / BOHR_TO_ANGSTROM).tolist()
                         )
                     if all(selective):
-                        structure_str["species"][-1]["atom"][-1]["movable"] = None
+                        structure_group["species"][-1]["atom"][-1]["movable"] = None
                     elif any(selective):
                         for ss, xx in zip(selective, ["X", "Y", "Z"]):
                             if ss:
-                                structure_str["species"][-1]["atom"][-1][
+                                structure_group["species"][-1]["atom"][-1][
                                     "movable" + xx
                                 ] = None
             if not symmetry_enabled:
-                structure_str["symmetry"] = odict(
+                structure_group["symmetry"] = odict(
                     [("operator", odict([("S", "[[1,0,0],[0,1,0],[0,0,1]]")]))]
                 )
         if cwd is not None:
             file_name = posixpath.join(cwd, file_name)
         with open(file_name, "w") as f:
-            f.write(self._odict_to_spx_input(structure_str))
+            f.write(structure_group.to_spx_str())
 
-    def write_basis(
-        self, file_name="basis.sx", cwd=None, basis_str=None, save_memory=False, kpoints_odict=None
-    ):
+
+    def write_spin_constraints(self, file_name="spins.in", cwd=None, spins_list=[]):
         """
-        Write the Sphinx bases set configuration file named basis.sx
+        Write a text file containing a list of all spins named spins.in -
+        which is used for the external control scripts.
 
         Args:
             file_name (str): name of the file to be written (optional)
             cwd (str): the current working directory (optinal)
-            basis_str (str): the input to write, if no input is given the default input will be written. (optinal)
-            kpoints_odict (collection.OrderedDict):
-        """
-
-        if kpoints_odict is None:
-            kpoints = odict(
-                [
-                    (
-                        "kPoint",
-                        odict(
-                            [
-                                ("coords", "KpointCoords"),
-                                ("weight", 1),
-                                ("relative", None),
-                            ]
-                        ),
-                    ),
-                    ("folding", "KpointFolding")
-                ]
-            )
-        else:
-            kpoints = kpoints_odict
-
-        if basis_str is None:
-            basis_str = odict([("eCut", "EnCut/13.606")])
-            basis_str.update(kpoints)
-            if save_memory:
-                basis_str["saveMemory"] = None
-        if cwd is not None:
-            file_name = posixpath.join(cwd, file_name)
-        with open(file_name, "w") as f:
-            f.write(self._odict_to_spx_input(basis_str))
-
-    def write_hamilton(self, file_name="hamilton.sx", cwd=None, hamilston_str=None):
-        """
-        Write the Sphinx hamilton configuration file named hamilton.sx
-
-        Args:
-            file_name (str): name of the file to be written (optional)
-            cwd (str): the current working directory (optinal)
-            hamilston_str (list): the input to write, if no input is given the default input will be written. (optinal)
-        """
-        if hamilston_str is None:
-            hamilston_str = odict(
-                [("nEmptyStates", "EmptyStates"), ("ekt", "Sigma"), ("xc", "Xcorr")]
-            )
-        if self._spin_enabled:
-            hamilston_str["spinPolarized"] = None
-        if cwd is not None:
-            file_name = posixpath.join(cwd, file_name)
-        with open(file_name, "w") as f:
-            f.write(self._odict_to_spx_input(hamilston_str))
-
-    def write_guess(
-        self,
-        file_name="guess.sx",
-        cwd=None,
-        guess_str=None,
-        restart_file_str=[],
-        write_waves=False,
-    ):
-        """
-        Write the Sphinx initial guess configuration file named guess.sx
-
-        Args:
-            file_name (str): name of the file to be written (optional)
-            cwd (str): the current working directory (optinal)
-            guess_str (str): the input to write, if no input is given the default input will be written. (optinal)
-        """
-        charge_density_file = None
-        for ff in restart_file_str:
-            if "rho.sxb" in ff.split("/")[-1]:
-                charge_density_file = ff
-        wave_function_file = None
-        for ff in restart_file_str:
-            if "waves.sxb" in ff.split("/")[-1]:
-                wave_function_file = ff
-        if guess_str is None:
-            guess_str = odict(
-                [("waves", odict([("lcao", odict()), ("pawBasis", None)]))]
-            )
-            if wave_function_file is not None:
-                guess_str["exchange"] = odict(
-                    [("file", '"' + wave_function_file + '"')]
-                )
-            if charge_density_file is None:
-                guess_str["rho"] = odict([("atomicOrbitals", None)])
-            else:
-                guess_str["rho"] = odict([("file", '"' + charge_density_file + '"')])
-            if np.any(self.structure.get_initial_magnetic_moments().flatten() != None):
-                if any(
-                    [
-                        True
-                        if isinstance(spin, list) or isinstance(spin, np.ndarray)
-                        else False
-                        for spin in self.structure.get_initial_magnetic_moments()
-                    ]
-                ):
-                    raise ValueError("Sphinx only supports collinear spins.")
-                else:
-                    for spin in self.structure.get_initial_magnetic_moments()[
-                        self.id_pyi_to_spx
-                    ]:
-                        guess_str["rho"].setdefault("atomicSpin", [])
-                        guess_str["rho"]["atomicSpin"].append(
-                            odict(
-                                [
-                                    ("label", '"spin_' + str(spin) + '"'),
-                                    ("spin", str(spin)),
-                                ]
-                            )
-                        )
-                self._spin_enabled = True
-            if not write_waves:
-                guess_str["noWavesStorage"] = None
-        if cwd is not None:
-            file_name = posixpath.join(cwd, file_name)
-        with open(file_name, "w") as f:
-            f.write(self._odict_to_spx_input(guess_str))
-
-    def write_spins_constraints(self, file_name="spins.in", cwd=None, spins_str=None):
-        """
-        Write a text file containing a list of all spins named spin.in - which is used for the external control scripts.
-
-        Args:
-            file_name (str): name of the file to be written (optional)
-            cwd (str): the current working directory (optinal)
-            spins_str (str): the input to write, if no input is given the default input will be written. (optinal)
+            spins_list (list): the input to write, if no input is given the default input will be written. (optinal)
         """
         s.logger.debug("Writing spins.in")
-        if spins_str is None:
+        if len(spins_list) == 0:
             s.logger.debug("Getting magnetic moments via get_initial_magnetic_moments")
             if any(self.structure.get_initial_magnetic_moments().flatten() != None):
                 if any(
@@ -1474,7 +1253,6 @@ class InputWriter(object):
                         "Sphinx only supports collinear spins at the moment."
                     )
                 else:
-                    spins_str = []
                     for spin, value in zip(
                         self.structure.spin_constraint[self.id_pyi_to_spx],
                         self.structure.get_initial_magnetic_moments()[
@@ -1482,10 +1260,10 @@ class InputWriter(object):
                         ],
                     ):
                         if spin:
-                            spins_str.append(str(value))
+                            spins_list.append(str(value))
                         else:
-                            spins_str.append("X")
-                    spins_str = "\n".join(spins_str)
+                            spins_list.append("X")
+                    spins_str = "\n".join(spins_list)
         if spins_str is not None:
             if cwd is not None:
                 file_name = posixpath.join(cwd, file_name)
@@ -1496,7 +1274,7 @@ class InputWriter(object):
 
 
 class Group(dict):
-    def __init__(self, name, *args, **kw):
+    def __init__(self, name=None, *args, **kw):
         super(Group, self).__init__(*args, **kw)
         self.name = name
         self.itemlist = super(Group, self).keys()
@@ -1592,9 +1370,11 @@ class Input(GenericParameters):
                 "atomicOrbitals": True
             }
         })
-        self.spin_constraint = Group("spinConstraint", {})
+        self.spin = Group("spinConstraint", {})
         self.main = Group("main", {})
 
+        self.groups = [self.basis, self.hamilton, self.guess,
+                       self.spin, self.main]
 
 class Output(object):
     """
