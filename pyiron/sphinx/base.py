@@ -64,6 +64,7 @@ class SphinxBase(GenericDFTJob):
         super(SphinxBase, self).__init__(project, job_name)
         self.output = SphinxOutput(job=self)
         self.input = Input()
+
         self._main_str = None
         self._species_str = None
         self._structure_str = None
@@ -95,7 +96,7 @@ class SphinxBase(GenericDFTJob):
 
     @property
     def plane_wave_cutoff(self):
-        return self.input["EnCut"]
+        return self.basis["eCut"]
 
     @property
     def fix_spin_constraint(self):
@@ -118,11 +119,17 @@ class SphinxBase(GenericDFTJob):
         """
         if val <= 0:
             raise ValueError("Cutoff radius value not valid")
-        self.input["EnCut"] = val
+        elif val < 50:
+            warnings.warn(
+                "The given cutoff is either very small (probably
+                too small), or was accidentally given in Ry. Please
+                ensure that the cutoff is in eV (1eV ~= 13.6 Ry)."
+            )
+        self.input.basis["eCut"] = val
 
     @property
     def exchange_correlation_functional(self):
-        return self.input["Xcorr"]
+        return self.input.basis["xc"]
 
     @exchange_correlation_functional.setter
     def exchange_correlation_functional(self, val):
@@ -135,13 +142,13 @@ class SphinxBase(GenericDFTJob):
 
         """
         if val.upper() in ["PBE", "LDA"]:
-            self.input["Xcorr"] = val.upper()
+            self.input.basis["xc"] = val.upper()
         else:
             warnings.warn(
                 "Exchange correlation function not recognized (recommended: PBE or LDA)",
                 SyntaxWarning,
             )
-            self.input["Xcorr"] = val
+            self.input.basis["xc"] = val
 
     def set_input_to_read_only(self):
         """
@@ -760,11 +767,25 @@ class SphinxBase(GenericDFTJob):
         The write_input function is called when the job is executed to generate all the required input files for the
         calculation of the Sphinx job.
         """
+ 
+        if self.input["VaspPot"]:
+            self.input_writer.write_potentials(potformat="VASP")
+        else:
+            self.input_writer.write_potentials(potformat="JTH")
+        self.input_writer.write_structure()
+        for group in [self.basis,
+                      self.hamilton,
+                      self.guess,
+                      self.spin_constraint,
+                      self.main]:
+            self.input_writer.write_group(group)
+        self.input_writer.write_wrapper()
+
         self._coarse_run = self.input["CoarseRun"]
-        if self.input["EmptyStates"] == "auto":
-            self.input["EmptyStates"] = int(len(self.structure) + 3)
+        if self.hamilton["EmptyStates"] == "auto":
+            self.hamilton["EmptyStates"] = int(len(self.structure) + 3)
             if np.any(self.structure.get_initial_magnetic_moments() != None):
-                self.input["EmptyStates"] = int(1.5 * len(self.structure) + 3)
+                self.hamilton["EmptyStates"] = int(1.5 * len(self.structure) + 3)
         self.input_writer.structure = self.structure
         write_waves = self.input["WriteWaves"]
         save_memory = self.input["SaveMemory"]
@@ -1019,45 +1040,7 @@ class InputWriter(object):
         self._id_spx_to_pyi = []
         self.file_dict = {}
 
-    def _odict_to_spx_input(self, element, level=0):
-        """
-        Convert collections.OrderedDict containing SPHInX input
-        hierarchy to string.
-
-        If the item contains:
-            - no value -> considered as flag -> output format: flag;
-            - value is odict
-                -> considered as a group
-                -> output format: group { ...recursive... }
-            - else
-                -> considered as parameter and value
-                -> output format: parameter = value;
-        """
-        line = ""
-        for k, v in element.items():
-            k = k.split("___")[0]
-            if type(v) != list:
-                v = [v]
-            for vv in v:
-                if vv is None:
-                    line += level * "\t" + str(k) + ";\n"
-                elif type(vv) == odict:
-                    if len(vv) == 0:
-                        line += level * "\t" + k + " {}\n"
-                    else:
-                        line += (
-                            level * "\t"
-                            + k
-                            + " {\n"
-                            + self._odict_to_spx_input(vv, level + 1)
-                            + level * "\t"
-                            + "}\n"
-                        )
-                else:
-                    line += level * "\t" + k + " = " + str(vv) + ";\n"
-        return line
-
-    def write_main(
+    def write_wrapper(
         self,
         file_name="input.sx",
         cwd=None,
@@ -1512,6 +1495,59 @@ class InputWriter(object):
             s.logger.debug("No magnetic moments")
 
 
+class Group(dict):
+    def __init__(self, name, *args, **kw):
+        super(Group, self).__init__(*args, **kw)
+        self.name = name
+        self.itemlist = super(Group, self).keys()
+
+    def __setitem__(self, key, value):
+        self.itemlist.append(key)
+        super(Group, self).__setitem__(key, value)
+
+    def __iter__(self):
+        return iter(self.itemlist)
+
+    def keys(self):
+        return self.itemlist
+
+    def values(self):
+        return [self[key] for key in self]
+
+    def itervalues(self):
+        return (self[key] for key in self)
+              
+    def to_spx_input(self, content="__self__", level=0):
+        line = ""
+        if content == "__self__":
+            content = self
+        for k, v in content.items():
+            k = k.split("___")[0]
+            if type(v) == list:
+                line += level * "\t" + k + "=" + str(v) + ";\n"
+            else:
+                v = [v]
+                for vv in v:
+                    if type(vv) == bool and vv is True:
+                        line += level * "\t" + str(k) + ";\n"
+
+                    elif type(vv) == dict:
+                        if len(vv) == 0:
+                            line += level * "\t" + k + " {}\n"
+                        else:
+                            line += (
+                                level * "\t"
+                                + k
+                                + " {\n"
+                                + self.to_spx_input(vv, level + 1)
+                                + level * "\t"
+                                + "}\n"
+                            )
+                    else:
+                        line += level * "\t" + k + " = " + str(vv) + ";\n"
+        return line
+
+
 class Input(GenericParameters):
     """
     class to control the generic input for a Sphinx calculation.
@@ -1529,32 +1565,35 @@ class Input(GenericParameters):
             separator_char="=",
             end_value_char=";",
         )
-        self._bool_dict = {True: "true", False: "false"}
 
-    def load_default(self):
-        """
-        Loads the default file content
-        """
-        file_content = (
-            "EnCut = 340\n"
-            "KpointCoords = [0.5, 0.5, 0.5]\n"
-            "KpointFolding = [4,4,4]\n"
-            "EmptyStates = auto\n"
-            "Sigma = 0.2\n"
-            "Xcorr = PBE\n"
-            "VaspPot = False\n"
-            "Estep = 400\n"
-            "Ediff = 1.0e-4\n"
-            "WriteWaves = True\n"
-            "KJxc = False\n"
-            "SaveMemory = True\n"
-            "CoarseRun = False\n"
-            "rhoMixing = 1.0\n"
-            "spinMixing = 1.0\n"
-            "CheckOverlap = True\n"
-            "THREADS = 1\n"
-        )
-        self.load_string(file_content)
+        self.basis = Group("basis", {
+            "eCut": 340,
+            "kPoint": {
+                "coords": [1/2, 1/2, 1/2],
+                "weight": 1,
+                "relative": True
+            },
+            "folding": [4, 4, 4]
+        })
+        self.hamilton = Group("PAWHamiltonian", {
+            "nEmptyStates": "auto",  # will be updated based on structure
+            "ekt": 0.1,
+            "xc": "PBE"
+        })
+        self.guess = Group("initialGuess", {
+            "waves": {
+                "lcao": {
+                    "maxSteps": 1,
+                    "rhoMixing": 0
+                },
+            "pawBasis": True
+            },
+            "rho": {
+                "atomicOrbitals": True
+            }
+        })
+        self.spin_constraint = Group("spinConstraint", {})
+        self.main = Group("main", {})
 
 
 class Output(object):
