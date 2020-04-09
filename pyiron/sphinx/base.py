@@ -65,13 +65,13 @@ class SphinxBase(GenericDFTJob):
         self.output = SphinxOutput(job=self)
         self.input = Input()
 
-        self._main_str = None
-        self._species_str = None
-        self._structure_str = None
-        self._basis_str = None
-        self._hamilston_str = None
-        self._guess_str = None
-        self._spins_str = None
+        # self._main_str = None
+        # self._species_str = None
+        # self._structure_str = None
+        # self._basis_str = None
+        # self._hamilston_str = None
+        # self._guess_str = None
+        # self._spins_str = None
         self._save_memory = False
         self._output_parser = Output(self)
         self.input_writer = InputWriter()
@@ -121,10 +121,11 @@ class SphinxBase(GenericDFTJob):
             raise ValueError("Cutoff radius value not valid")
         elif val < 50:
             warnings.warn(
-                "The given cutoff is either very small- probably\
-                too small- or was accidentally given in Ry. Please\
-                ensure that the cutoff is in eV (1eV ~= 13.6 Ry)."
+                "The given cutoff is either very small (probably \
+                too small) or was accidentally given in Ry --> \
+                convertinging given cutoff to eV (1eV = 13.606 Ry)."
             )
+            val *= 13.606
         self.input.basis["eCut"] = val
 
     @property
@@ -134,115 +135,114 @@ class SphinxBase(GenericDFTJob):
     @exchange_correlation_functional.setter
     def exchange_correlation_functional(self, val):
         """
-
         Args:
             exchange_correlation_functional:
 
         Returns:
-
         """
         if val.upper() in ["PBE", "LDA"]:
             self.input.basis["xc"] = val.upper()
         else:
             warnings.warn(
-                "Exchange correlation function not recognized (recommended: PBE or LDA)",
+                "Exchange correlation function not recognized (\
+                    recommended: PBE or LDA)",
                 SyntaxWarning,
             )
             self.input.basis["xc"] = val
 
     def set_input_to_read_only(self):
         """
-        This function enforces read-only mode for the input classes, but it has to be implement in the individual
-        classes.
+        This function enforces read-only mode for the input classes,
+        but it has to be implemented in the individual classes.
         """
         super(SphinxBase, self).set_input_to_read_only()
         self.input.read_only = True
 
-    def _input_control_scf_string(
-        self, maxSteps=None, keepRhoFixed=False, dEnergy=None, algorithm="blockCCG"
+    def get_scf_group(
+        self, maxSteps=None, keepRhoFixed=False, dEnergy=None,
+        algorithm="blockCCG"
     ):
         """
-            scf control string setting for SPHInX
-            for all args refer to calc_static or calc_minimize
+        SCF group setting for SPHInX
+        for all args refer to calc_static or calc_minimize
         """
         if algorithm.upper() == "CCG":
             algorithm = "CCG"
-        else:
-            if algorithm.upper() != "BLOCKCCG":
-                warnings.warn(
-                    "Algorithm not recognized -> setting to blockCCG. Alternatively, choose algorithm=CCG",
-                    SyntaxWarning,
-                )
+        elif algorithm.upper() != "BLOCKCCG":
+            warnings.warn(
+                "Algorithm not recognized -> setting to blockCCG. \
+                    Alternatively, choose algorithm=CCG",
+                SyntaxWarning,
+            )
             algorithm = "blockCCG"
-        control_str = odict()
+        scf_group = Group("scf", {})
         if keepRhoFixed:
-            control_str["keepRhoFixed"] = None
+            scf_group["keepRhoFixed"] = True
         else:
-            control_str["rhoMixing"] = str(self.input["rhoMixing"])
-            control_str["spinMixing"] = str(self.input["spinMixing"])
+            scf_group["rhoMixing"] = str(self.input["rhoMixing"])
+            scf_group["spinMixing"] = str(self.input["spinMixing"])
             if self.input["nPulaySteps"] is not None:
-                control_str["nPulaySteps"] = str(self.input["nPulaySteps"])
+                scf_group["nPulaySteps"] = str(self.input["nPulaySteps"])
         if dEnergy is None:
-            control_str["dEnergy"] = "Ediff/" + str(HARTREE_TO_EV)
+            scf_group["dEnergy"] = "Ediff/" + str(HARTREE_TO_EV)
         else:
-            control_str["dEnergy"] = str(dEnergy)
+            scf_group["dEnergy"] = str(dEnergy)
         if maxSteps is None:
-            control_str["maxSteps"] = str(self.input["Estep"])
+            scf_group["maxSteps"] = str(self.input["Estep"])
         else:
-            control_str["maxSteps"] = str(maxSteps)
+            scf_group["maxSteps"] = str(maxSteps)
         if self.input["preconditioner"] is not None:
-            control_str["preconditioner"] = odict(
+            scf_group["preconditioner"] = odict(
                 [("type", self.input["preconditioner"])]
             )
-        control_str[algorithm] = odict()
+        scf_group[algorithm] = odict()
         if self.input["maxStepsCCG"] is not None:
-            control_str[algorithm]["maxStepsCCG"] = self.input["maxStepsCCG"]
+            scf_group[algorithm]["maxStepsCCG"] = self.input["maxStepsCCG"]
         if self.input["blockSize"] is not None and algorithm == "blockCCG":
-            control_str[algorithm]["blockSize"] = self.input["blockSize"]
+            scf_group[algorithm]["blockSize"] = self.input["blockSize"]
         if self.input["nSloppy"] is not None and algorithm == "blockCCG":
-            control_str[algorithm]["nSloppy"] = self.input["nSloppy"]
+            scf_group[algorithm]["nSloppy"] = self.input["nSloppy"]
         if self.input["WriteWaves"] is False:
-            control_str["noWavesStorage"] = None
-        return control_str
+            scf_group["noWavesStorage"] = True
+        return scf_group
 
     @property
-    def _control_str(self):
-        control_str = odict()
-        control_str.setdefault("scfDiag", [])
+    def set_main_group(self):
+
+        self.input.main.setdefault("scfDiag", [])
         if len(self.restart_file_list) != 0 and not self._generic_input["restart_for_band_structure"]:
-            control_str["scfDiag"].append(
-                self._input_control_scf_string(
+            self.input.main["scfDiag"].append(
+                self.get_scf_group(
                     maxSteps=10, keepRhoFixed=True, dEnergy=1.0e-4
                 )
             )
         if self.input["Istep"] is not None:
-            control_str["linQN"] = odict()
-            control_str["linQN"]["maxSteps"] = str(self.input["Istep"])
+            self.input.main["linQN"] = odict()
+            self.input.main["linQN"]["maxSteps"] = str(self.input["Istep"])
             if self.input["dE"] is None and self.input["dF"] is None:
                 self.input["dE"] = 1e-3
             if self.input["dE"] is not None:
-                control_str["linQN"]["dEnergy"] = str(self.input["dE"] / HARTREE_TO_EV)
+                self.input.main["linQN"]["dEnergy"] = str(self.input["dE"] / HARTREE_TO_EV)
             if self.input["dF"] is not None:
-                control_str["linQN"]["dF"] = str(
+                self.input.main["linQN"]["dF"] = str(
                     self.input["dF"] / HARTREE_OVER_BOHR_TO_EV_OVER_ANGSTROM
                 )
-            control_str["linQN"]["bornOppenheimer"] = odict(
-                [("scfDiag", self._input_control_scf_string())]
-            )
+            self.input.main["linQN"]["bornOppenheimer"] = self.get_scf_group()
+
         else:
             if self._generic_input["restart_for_band_structure"]:
-                control_str["scfDiag"].append(self._input_control_scf_string(keepRhoFixed=True))
+                self.input.main["scfDiag"].append(self.get_scf_group(keepRhoFixed=True))
             else:
-                control_str["scfDiag"].append(self._input_control_scf_string())
+                self.input.main["scfDiag"].append(self.get_scf_group())
             if self.executable.version is not None:
                 vers_num = [
                     int(vv) for vv in self.executable.version.split("_")[0].split(".")
                 ]
                 if vers_num[0] > 2 or (vers_num[0] == 2 and vers_num[1] > 5):
-                    control_str["evalForces"] = odict([("file", '"relaxHist.sx"')])
+                    self.input.main["evalForces"] = odict([("file", '"relaxHist.sx"')])
             else:
                 warnings.warn("executable version could not be identified")
-        return control_str
+
 
     def calc_static(
         self,
@@ -258,8 +258,8 @@ class SphinxBase(GenericDFTJob):
             retain_electrostatic_potential:
             retain_charge_density:
             algorithm (str): CCG or blockCCG (not implemented)
-            electronic_steps (int): maximum number of electronic steps, which can be used
-                                    to achieve convergence
+            electronic_steps (int): maximum number of electronic steps
+                which can be used to achieve convergence
         """
         if electronic_steps is not None:
             self.input["Estep"] = electronic_steps
@@ -661,7 +661,7 @@ class SphinxBase(GenericDFTJob):
                 raise ValueError("Number of empty states must be greater than 0")
             self.input["EmptyStates"] = n_empty_states
 
-    def _set_kpoints(
+    def set_kpoints(
         self,
         mesh=None,
         scheme="MP",
@@ -695,11 +695,11 @@ class SphinxBase(GenericDFTJob):
         if weights is not None:
             raise ValueError("manual weights are not implmented in SPHInX yet")
         if scheme == "MP":
-            self._kpoints_odict = None
+            self.input.basis["kPoint"] = {}
             if mesh is not None:
-                self.input["KpointFolding"] = str(list(mesh))
+                self.input.basis["kPoint"]["folding"] = str(list(mesh))
             if center_shift is not None:
-                self.input["KpointCoords"] = str(list(center_shift))
+                self.input.basis["kPoint"]["coords"] = str(list(center_shift))
         elif scheme == "Line":
             if n_path is None and self._generic_input["n_path"] is None:
                 raise ValueError("'n_path' has to be defined")
@@ -723,7 +723,7 @@ class SphinxBase(GenericDFTJob):
             except KeyError:
                 raise AssertionError("'{}' is not a valid path!".format(path_name))
 
-            kpoints = odict([("relative", None)])
+            kpoints = odict([("relative", True)])
 
             kpoints["from"] = odict(
                 [
@@ -759,7 +759,9 @@ class SphinxBase(GenericDFTJob):
                     ]
                 )
 
-            self._kpoints_odict = odict([("kPoints", kpoints)])
+            if "kPoint" in self.input.basis:
+                del self.input.basis["kPoint"]
+            self.input.basis["kPoints"] = Group("kPoints", kpoints)
         else:
             raise ValueError("only Monkhorst-Pack mesh and Line mode\
                 are implemented in SPHInX")
@@ -778,13 +780,17 @@ class SphinxBase(GenericDFTJob):
                     1.5 * len(self.structure) + 3)
         self.input_writer.structure = self.structure
 
+
+
         check_overlap = self.input["CheckOverlap"]
         enable_kjxc = self.input["KJxc"]
 
         if self.input["VaspPot"]:
-            self.input_writer.write_potentials(potformat="VASP", check_overlap=check_overlap)
+            self.input_writer.write_potentials(potformat="VASP",
+                check_overlap=check_overlap)
         else:
-            self.input_writer.write_potentials(potformat="JTH", check_overlap=check_overlap)
+            self.input_writer.write_potentials(potformat="JTH",
+                check_overlap=check_overlap)
 
         self.input_writer.write_structure()
 
@@ -794,11 +800,11 @@ class SphinxBase(GenericDFTJob):
         if self.input["SaveMemory"] is True:
             self.input.basis["saveMemory"] = True
 
-        self.input.basis["eCut"] /= 13.606
-
         if self._generic_input["fix_spin_constraint"]:
             self.input_writer.write_spin_constraints()
             self.input.spin["file"] = "spins.in"
+            if self.input.spin not in self.input.groups:
+                self.input.groups.append(self.input.spin)
 
         for group in self.input.groups:
             # basis, PAWHamiltionian, initialGuess, spinConstraint, & main
@@ -876,33 +882,33 @@ class SphinxBase(GenericDFTJob):
             warnings.simplefilter("always")
             if (
                 not (
-                    isinstance(self.input["EnCut"], int)
-                    or isinstance(self.input["EnCut"], float)
+                    isinstance(self.input.basis["eCut"], int)
+                    or isinstance(self.input.basis["eCut"], float)
                 )
-                or self.input["EnCut"] == 340
+                or self.input[.basis"eCut"] == 340
             ):
                 warnings.warn(
                     "Energy cut-off value wrong or not modified from default 340 eV; change it via job.set_encut()"
                 )
             if not (
-                isinstance(self.input["KpointCoords"], list)
-                or len(self.input["KpointCoords"]) != 3
+                isinstance(self.input.basis["kPoint"]["coords"], list)
+                or len(self.input.basis["kPoint"]["coords"]) != 3
             ):
                 warnings.warn("K point coordinates seem to be inappropriate")
             if (
                 not (
-                    isinstance(self.input["Sigma"], int)
-                    or isinstance(self.input["Sigma"], float)
+                    isinstance(self.input.basis["ekt"], int)
+                    or isinstance(self.input.basis["ekt"], float)
                 )
-                or self.input["Sigma"] == 0.2
+                or self.input.basis["ekt"] == 0.2
             ):
                 warnings.warn(
                     "Fermi smearing value wrong or not modified from default 0.2 eV; change it via job.set_occupancy_smearing()"
                 )
             if not (
-                isinstance(self.input["KpointFolding"], list)
-                or len(self.input["KpointFolding"]) != 3
-            ) or self.input["KpointFolding"] == [4, 4, 4]:
+                isinstance(self.input.basis["kPoint"]["folding"], list)
+                or len(self.input[.basis["kPoint"]["folding"]) != 3
+            ) or self.input.basis["kPoint"]["folding"] == [4, 4, 4]:
                 warnings.warn(
                     "K point folding wrong or not modified from default [4,4,4]; change it via job.set_kpoints()"
                 )
@@ -911,7 +917,7 @@ class SphinxBase(GenericDFTJob):
                     "Number of cores exceed number of irreducible reciprocal points: "
                     + str(self.get_n_ir_reciprocal_points())
                 )
-            if self.input["EmptyStates"] == "auto":
+            if self.input.hamilton["nEmptyStates"] == "auto":
                 if any(self.structure.get_initial_magnetic_moments() != None):
                     warnings.warn(
                         "Number of empty states was not specified. Default: NIONS*1.5 for magnetic systems. "
@@ -930,23 +936,28 @@ class SphinxBase(GenericDFTJob):
 
     def validate_ready_to_run(self):
         """
-            Checks whether parameters are set appropriately. It does not mean the simulation won't run even if it returns False
+        Checks whether parameters are set appropriately. It does not
+        mean the simulation won't run if it returns False.
         """
-        if self._control_str is None:
+        if len(self.input.main) == 0:
             self.calc_static()
         if self.structure is None:
             raise AssertionError(
-                "Structure not set; set it via job.structure = Project().create_structure()"
+                "Structure not set; set it via job.structure = \
+                    Project().create_structure()"
             )
-        if self._control_str is None:
+        if len(self.input.main) == 0:
             raise AssertionError(
-                "Control string not set; set it e.g. via job.calc_static()"
+                "self.input.main group not initialized; \
+                    setting it e.g. via job.calc_static()"
             )
         if self.input["THREADS"] > self.server.cores:
             raise AssertionError(
-                "Number of cores cannot be smaller than the number of OpenMP threads"
+                "Number of cores cannot be smaller than the number \
+                    of OpenMP threads"
             )
-        if self.input["EmptyStates"] != "auto" and self.input["EmptyStates"] < 0:
+        if self.input.hamilton["nEmptyStates"] != "auto"\
+            and self.input.hamilton["nEmptyStates"] < 0:
             raise AssertionError("Number of empty states not valid")
 
     def compress(self, files_to_compress=None):
@@ -959,8 +970,11 @@ class SphinxBase(GenericDFTJob):
         # delete empty files
         if files_to_compress is None:
             files_to_compress = [
-                f for f in list(self.list_files()) if (f not in ["rho.sxb", "waves.sxb"]
-                                                       and not stat.S_ISFIFO(os.stat(os.path.join(self.working_directory, f)).st_mode))
+                f for f in list(self.list_files())
+                if (f not in ["rho.sxb", "waves.sxb"]
+                and not stat.S_ISFIFO(os.stat(os.path.join(
+                    self.working_directory, f
+                )).st_mode))
             ]
         for f in list(self.list_files()):
             filename = os.path.join(self.working_directory, f)
@@ -974,12 +988,15 @@ class SphinxBase(GenericDFTJob):
 
     @staticmethod
     def check_vasp_potentials():
-        return any([os.path.exists(os.path.join(p, 'vasp')) for p in s.resource_paths])
+        return any(
+            [os.path.exists(os.path.join(p, 'vasp')) for p in s.resource_paths]
+        )
 
 
 class InputWriter(object):
     """
-    The Sphinx Input writer is called to write the Sphinx specific input files.
+    The Sphinx Input writer is called to write the
+    Sphinx specific input files.
     """
 
     def __init__(self):
@@ -1063,7 +1080,8 @@ class InputWriter(object):
         Args:
             file_name (str): name of the file to be written (optional)
             cwd (str): the current working directory (optional)
-            species (Group): the input to write, if no input is given the default input will be written. (optional)
+            species (Group): the input to write, if no input is given
+                the default input will be written. (optional)
         """
         if potformat == 'JTH':
             potentials = SphinxJTHPotentialFile(xc=xc)
@@ -1154,7 +1172,8 @@ class InputWriter(object):
         Args:
             file_name (str): name of the file to be written (optional)
             cwd (str): the current working directory (optinal)
-            structure_group (Group): the input to write, if no input is given the default input will be written. (optional)
+            structure_group (Group): the input to write, if no input
+                is given the default input will be written. (optional)
         """
         if structure_group is None:
             if keep_angstrom:
@@ -1162,7 +1181,7 @@ class InputWriter(object):
                     [("cell", str(np.array(self.structure.cell).tolist()))]
                 )
             else:
-                structure_group = Group("structure"
+                structure_group = Group("structure",
                     [
                         (
                             "cell",
@@ -1235,7 +1254,8 @@ class InputWriter(object):
         Args:
             file_name (str): name of the file to be written (optional)
             cwd (str): the current working directory (optinal)
-            spins_list (list): the input to write, if no input is given the default input will be written. (optinal)
+            spins_list (list): the input to write, if no input is
+                given the default input will be written. (optional)
         """
         s.logger.debug("Writing spins.in")
         if len(spins_list) == 0:
@@ -1277,7 +1297,7 @@ class Group(dict):
     def __init__(self, name=None, *args, **kw):
         super(Group, self).__init__(*args, **kw)
         self.name = name
-        self.itemlist = super(Group, self).keys()
+        self.itemlist = list(super(Group, self).keys())
 
     def __setitem__(self, key, value):
         self.itemlist.append(key)
@@ -1287,7 +1307,7 @@ class Group(dict):
         return iter(self.itemlist)
 
     def keys(self):
-        return self.itemlist
+        return list(self.itemlist)
 
     def values(self):
         return [self[key] for key in self]
@@ -1295,20 +1315,26 @@ class Group(dict):
     def itervalues(self):
         return (self[key] for key in self)
               
-    def to_spx_input(self, content="__self__", level=0):
+    def to_spx_str(self, content="__self__", level=0):
         line = ""
         if content == "__self__":
             content = self
         for k, v in content.items():
             k = k.split("___")[0]
+            
+            if k == "eCut":
+                v = round(v/13.606, 3)
+
             if type(v) == list:
                 line += level * "\t" + k + "=" + str(v) + ";\n"
+                
             else:
                 v = [v]
                 for vv in v:
-                    if type(vv) == bool and vv is True:
-                        line += level * "\t" + str(k) + ";\n"
-
+                    if type(vv) == bool:
+                        if vv is True:
+                            line += level * "\t" + str(k) + ";\n"
+                        
                     elif type(vv) == dict:
                         if len(vv) == 0:
                             line += level * "\t" + k + " {}\n"
@@ -1317,7 +1343,7 @@ class Group(dict):
                                 level * "\t"
                                 + k
                                 + " {\n"
-                                + self.to_spx_input(vv, level + 1)
+                                + self.to_spx_str(vv, level + 1)
                                 + level * "\t"
                                 + "}\n"
                             )
@@ -1373,8 +1399,9 @@ class Input(GenericParameters):
         self.spin = Group("spinConstraint", {})
         self.main = Group("main", {})
 
-        self.groups = [self.basis, self.hamilton, self.guess,
-                       self.spin, self.main]
+        # Required groups; spin is added later if requested.
+        self.groups = [self.basis, self.hamilton, self.guess, self.main]
+
 
 class Output(object):
     """
